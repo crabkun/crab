@@ -1,0 +1,22 @@
+{
+  "mode": "server",
+  "log_level": "debug",
+  "master": "crab.myserver.com:51324",
+  "master_key": "crabserver",
+  "ports": [
+    {
+      "mark": "远程桌面",
+      "local_address": "127.0.0.1:3389",
+      "port_key": "T6wjoGQaqfDFDs1tySHVe8RXYYxnjWo4",
+      "encrypt_method": "aes-128-cfb",
+      "compress_method": "zstd"
+    },
+    {
+      "mark": "SSH",
+      "local_address": "127.0.0.1:22",
+      "port_key": "lm6dQFjcaLyuVoy1Q4DqnunmnVz9b7CE",
+      "encrypt_method": "aes-128-cfb",
+      "compress_method": "zstd"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "mode": "master",
+  "log_level": "debug",
+  "listen_at": "0.0.0.0:51324",
+  "master_key": "crabserver"
+}
