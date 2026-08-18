@@ -1,0 +1,16 @@
+.git
+.gitignore
+*.md
+LICENSE
+bin
+dist
+config.json
+config-examples
+deploy
+Dockerfile
+docker-compose.yml
+.dockerignore
+**/*_test.go
+.idea
+.vscode
+.DS_Store

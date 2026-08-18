@@ -1,0 +1,14 @@
+{
+  "mode": "client",
+  "log_level": "info",
+  "master": "master:51324",
+  "ports": [
+    {
+      "mark": "demo-nginx",
+      "local_address": "0.0.0.0:18080",
+      "port_key": "demo-nginx-port-key",
+      "encrypt_method": "aes-128-cfb",
+      "compress_method": "zstd"
+    }
+  ]
+}

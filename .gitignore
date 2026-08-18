@@ -1,0 +1,11 @@
+/crab
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+config.json
+.DS_Store
+.idea/
+.vscode/
+coverage.out

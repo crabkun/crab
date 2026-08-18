@@ -1,47 +1,91 @@
-## 关于Crab
-一个用GO语言编写的内网穿透工具。与其他内网穿透工具不同，本工具仅需要公网服务器开放一个端口就可以支撑多个用户同时穿透多个端口，
+# Crab
 
-## 特性
- 1. 服务器仅需开放一个端口就可以支撑多个用户同时穿透多个端口  
- 1. 穿透后的端口不会暴露在公网上，以免遭受攻击或入侵
- 1. 支持流量加密（目前仅支持aes-128-cfb加密方式）
- 1. 支持流量压缩（目前仅支持[s2](https://github.com/klauspost/compress/tree/master/s2#s2-compression)和[zstd](https://github.com/klauspost/compress/tree/master/zstd#zstd)两种压缩算法）
+用 Go 写的内网穿透工具。公网机器只开 **一个 TCP 端口**，就能同时给多个用户穿透多个内网端口；被穿透的服务不会暴露在公网上。
 
-## 说明
-本工具有三种身份：master、server、client
+常见穿透工具每映射一个端口就要在公网上再开一个端口，连上就能被扫到。Crab 不是这种模型：流量始终从你自己的 client 走进去，外人看不到、也连不上家里的 3389 或 22。
+
+## 它适合什么场景
+
+家里有公网服务器，但你并不想把远程桌面、数据库、游戏服直接挂到公网上。或者你买的是便宜大带宽 NAT 机器，只能开十来个端口，传统工具穿透几个服务就把配额吃光了。
+
+典型用法：
+
+| 你在哪 | 跑什么 | 结果 |
+| --- | --- | --- |
+| 公网服务器 | master | 只监听一个端口，给所有人中转 |
+| 家里电脑 | server | 把 3389、3306、22 等注册上去 |
+| 外面的电脑 | client | 连本地的 13389，就等于连家里的 3389 |
+
+也可以只把配好的 client 发给朋友。朋友连自己电脑上的 `127.0.0.1:27015`，流量进你家的游戏服；公网上看不到 27015。不想对外开放的 Web、SSH 也是同一套做法。
+
+## 三个角色
+
+同一个二进制，靠配置里的 `mode` 区分身份。
+
+**master** 跑在公网，只负责转发。server 和 client 都连它。它不碰加密和压缩，也不接触你内网的真实端口。
+
+**server** 跑在有服务的那台内网机器上。配置里写清要穿透的地址和 `port_key`，启动后向 master 注册。只有拿着同一把 `port_key` 的 client 才能连进来。
+
+**client** 跑在你想发起连接的那一侧。配上同样的 `port_key`，在本地听一个端口。有人连这个本地端口时，流量经 master 转到 server 背后的真实地址。
+
+两把钥匙：
+
+- `master_key`：server 向 master 注册时用。对上了才能挂端口，朋友的 server 要用你的 master，把这把钥匙给他就行。
+- `port_key`：每一路穿透自己的钥匙。client 和 server 必须一致，也用作加密密钥的原料。不同端口请用不同的 key。
+
+## 下载
+
+到 [GitHub Releases](https://github.com/crabkun/crab/releases) 按系统下载压缩包，解压即可用。Windows 是 `.zip`，其他平台是 `.tar.gz`。也提供 `SHA256SUMS` 做校验。
+
+解压后把 `config-examples/` 里对应角色的样例拷成 `config.json`，改好地址和密钥再启动：
+
+```bash
+./crab --config config.json
+```
+
+## 从源码构建
+
+默认读当前目录的 `config.json`，也可以 `--config` 另指定。需要 Go 1.26 及以上。
+
+```bash
+make build
+./bin/crab --config config.json
+```
+
+顶层字段可以用环境变量覆盖，前缀 `CRAB_`，例如 `CRAB_MASTER_KEY`、`CRAB_LISTEN_AT`、`CRAB_LOG_LEVEL`。
+
+公网 master 用 Docker 部署：
+
+```bash
+# 先改 deploy/master.json 里的 master_key
+docker compose up -d --build
+```
+
+容器默认读 `/etc/crab/config.json`，以非 root 运行，映射宿主机 `51324`。也可以自己构建：
+
+```bash
+docker build -t crab:2.0.0 .
+docker run --rm \
+  -v "$PWD/deploy/master.json:/etc/crab/config.json:ro" \
+  -p 51324:51324 \
+  crab:2.0.0
+```
+
+想在本机把整条链路跑通（master + 一台只在内网的 nginx + server + client）：
+
+```bash
+docker compose --profile demo up -d --build
+curl -I http://127.0.0.1:18080/
+```
+
+演示里的 nginx 不对外发布。你访问本机 `18080` 时，流量是 client → master → server → nginx。
+
+## 配置
+
+三种角色共用一份 JSON，按 `mode` 取自己需要的字段。下面这一组配完之后：外面连 `127.0.0.1:13389` / `127.0.0.1:122`，就等于连家里的远程桌面和 SSH。
 
 ### master
-master运行在你的公网服务器上，负责中转流量。仅需监听一个端口供多个server和多个client连接
 
-### server
-server运行在你的内网电脑上，在配置文件中定义好要穿透的端口以及其port key之后，server会将端口注册到master，并供持有相同port key的client连接使用
-
-### client
-client运行在你另一个网络的电脑上，client需要跟server配置同样的port key，然后client会在本地监听相同的端口，当有连接到端口时，client会将流量通过master穿透转发到server的端口上
-
-
-## 使用场景举例
-3台电脑：
- - 公网服务器
- - 家里电脑（开放了3389、3306端口）
- - 外面电脑（想要连接家里电脑的3389和3306端口）
- 
-公网服务器运行master  
-家里电脑运行server，并把3389、3306端口注册到master上面。3389的port key是ABC123，3306的port key是CDE456  
-外面电脑运行client，配置ABC123监听本地13389端口，配置CDE456监听本地13306端口。此时外面电脑连接他本地的13389、13306端口，就相当于连接到家里的3389、3306端口
-
-亦或者  
-你家电脑开游戏服务端(端口27015)和server，然后你配置好client发送给你朋友，你朋友连接他本地的127.0.0.1:27015，就会转发到你电脑的27015端口
-
-亦或者  
-你家电脑开了某些不想给外人访问的服务(端口80)和server，然后你配置好client发送给你朋友，你朋友连接他本地的127.0.0.1:80，就会转发到你电脑的80端口
-
-## 配置文件
-
-程序在默认情况下会自动加载运行目录下面的config.json文件，当然你也可以通过--config xxxx参数来指定配置文件路径  
-config-examples目录下面有各角色的配置文件，可以参考
-
-### master配置
 ```json
 {
   "mode": "master",
@@ -50,14 +94,16 @@ config-examples目录下面有各角色的配置文件，可以参考
   "master_key": "crabserver"
 }
 ```
-|字段|解释|
-| --- | ---|
-|mode|程序的运行角色（可选master、server、client）|
-|log_level|日志级别（可选debug、info、error）|
-|listen_at|master角色特有配置，表示master监听在哪个端口上面|
-|master_key|master/server角色特有配置，表示master密钥，当server与master配置一样的时候，server才能把端口注册到master|
 
-### server配置
+| 字段 | 说明 |
+| --- | --- |
+| `mode` | `master` / `server` / `client` |
+| `log_level` | `debug` / `info` / `warn` / `error` |
+| `listen_at` | master 监听地址 |
+| `master_key` | 注册口令，server 必须相同 |
+
+### server
+
 ```json
 {
   "mode": "server",
@@ -83,23 +129,19 @@ config-examples目录下面有各角色的配置文件，可以参考
 }
 ```
 
-|字段|解释|
-| --- | ---|
-|mode|程序的运行角色（可选master、server、client）|
-|log_level|日志级别（可选debug、info、error）|
-|master|master服务器的地址|
-|master_key|master/server角色特有配置，表示master密钥，当server与master配置一样的时候，server才能把端口注册到master|
-|ports|需要注册到master的端口列表|
-|ports.mark|端口备注（用于日志排错用）|
-|ports.local_address|需要穿透的本地端口|
-|ports.port_key|端口的port_key，当server与client配置一样的时候，client才能把流量转发到此端口|
-|ports.encrypt_method|加密方式（可选plain、aes-128-cfb）|
-|ports.compress_method|压缩方式（可选null、s2、zstd）|
+| 字段 | 说明 |
+| --- | --- |
+| `master` | master 地址 |
+| `master_key` | 与 master 一致才能注册 |
+| `ports` | 要挂到 master 上的端口 |
+| `ports.mark` | 备注，只出现在日志里 |
+| `ports.local_address` | 内网真实服务地址 |
+| `ports.port_key` | 这一路的钥匙，client 必须相同 |
+| `ports.encrypt_method` | `plain` 或 `aes-128-cfb` |
+| `ports.compress_method` | `null`、`s2` 或 `zstd` |
 
+### client
 
-
-
-### client配置
 ```json
 {
   "mode": "client",
@@ -124,44 +166,48 @@ config-examples目录下面有各角色的配置文件，可以参考
 }
 ```
 
-|字段|解释|
-| --- | ---|
-|mode|程序的运行角色（可选master、server、client）|
-|log_level|日志级别（可选debug、info、error）|
-|master|master服务器的地址|
-|ports|需要连接的端口列表|
-|ports.mark|端口备注（用于日志排错用）|
-|ports.local_address|此端口穿透成功后在本地监听的地址|
-|ports.port_key|端口的port_key，当server与client配置一样的时候，client才能把流量转发到此端口|
-|ports.encrypt_method|加密方式（可选plain、aes-128-cfb），必须与server一致|
-|ports.compress_method|压缩方式（可选null、s2、zstd），必须与server一致|
+| 字段 | 说明 |
+| --- | --- |
+| `master` | master 地址 |
+| `ports.local_address` | 穿透成功后在本机监听的地址 |
+| `ports.port_key` | 与对应 server 端口一致 |
+| `ports.encrypt_method` | 必须与 server 一致 |
+| `ports.compress_method` | 必须与 server 一致 |
 
+## 加密和压缩
 
-上面三个配置文件，运行起来最终效果是：client连接127.0.0.1:13389或127.0.0.1:122，就相当于连接到master的3389或22端口
+加密、压缩都发生在 server 和 client 两端，master 只转发已经处理好的字节流。
 
-## 压缩算法的选择
-资源占用（CPU、内存）：zstd > s2  
-压缩率：zstd > s2  
-PS：资源占用指的是server和client的资源占用，master不参与压缩和解压所以压缩算法对master无影响  
+加密：
 
-总的来说，zstd资源占用高，但压缩率也很高。我家35兆上传带宽，在外面穿透回家下载某个PS2游戏ISO文件，s2跑出了64兆的平均速度，zstd跑出了104兆的平均速度。当然这个与文件有关，如果你传输的数据原本就已经被压缩过，压缩算法对速度的提升就非常小了。  
-如果server的机器配置比较低，建议还是用s2压缩或者不压缩
+- `plain`：不加密
+- `aes-128-cfb`：用 `port_key` 派生密钥
+
+压缩：
+
+| | 占用（CPU / 内存） | 压缩率 |
+| --- | --- | --- |
+| `zstd` | 高 | 高 |
+| `s2` | 低 | 低一些 |
+| `null` | 无 | 无 |
+
+家里上行只有几十兆的时候，传尚未压缩过的大文件，zstd 往往比 s2 更快，因为它先把体积压下去了。如果传的本身就是 zip、视频这类已经压过的数据，两种算法都帮不上多少忙。机器比较慢时用 `s2`，或者直接 `null`。
 
 ## 常见问题
-### 1.我都有公网IP服务器了，为啥不用其他端口穿透工具？  
-这个要看你个人需求，就我个人来讲：  
- 1. 传统的端口穿透工具会让穿透后的端口暴露在公网。考虑到安全问题，我不想把端口暴露在公网。而且我穿透端口不是为了分享给别人连接，是为了能让自己在外面能连接回来
- 1. 我购买的服务器是便宜且大带宽NAT服务器，但缺点是只能开放10个端口。 传统的端口穿透工具每穿透一个端口都要占用一个端口，再加上其本身的控制端口，就剩下更少了。所以我需要一个仅占用一个端口就能映射N个端口的工具
 
-### 2.我公网上的master服务器，可以让我朋友的server也注册上来吗？
-可以，只需要你朋友的server配置好你的master地址和相同的master key，他也能把端口注册到你的master上面来
+**已经有公网 IP 了，为什么还要用这个？**
 
-### 3.后续更新功能？
- 1. master的port key管理优化，支持接入第三方数据库
- 1. master针对port key进行限速、限流量
+两件事。第一，传统工具会把端口摊在公网上。我穿透是为了自己在外面连回家，不是为了给全世界连，多一个端口就多一块攻击面。第二，不少便宜大带宽机器是 NAT，只能开有限几个端口。传统方案「一个内网端口 + 一个公网端口」，再加控制端口，额度很快就没了。Crab 用一个公网端口映射任意多个内网端口。
 
-## 遇到了问题？
-欢迎提issue或Pull Request
+**朋友的 server 能挂到我的 master 上吗？**
 
-## 开源协议
-BSD 3-Clause License
+可以。他把 master 地址和 `master_key` 配成跟你一样即可。每一路仍由各自的 `port_key` 隔离。
+
+**还想做的：**
+
+1. master 上的 port key 管理，能接到外部数据库
+2. 按 port key 限速、限流量
+
+## 许可
+
+BSD 3-Clause。问题或改进欢迎提 issue / PR。

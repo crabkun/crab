@@ -1,0 +1,15 @@
+{
+  "mode": "server",
+  "log_level": "info",
+  "master": "master:51324",
+  "master_key": "crabserver",
+  "ports": [
+    {
+      "mark": "demo-nginx",
+      "local_address": "demo-backend:80",
+      "port_key": "demo-nginx-port-key",
+      "encrypt_method": "aes-128-cfb",
+      "compress_method": "zstd"
+    }
+  ]
+}

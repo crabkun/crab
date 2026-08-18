@@ -1,0 +1,71 @@
+# Deploy the public-facing master with:
+#   docker compose up -d --build
+#
+# Bring up a local end-to-end demo (master + intranet server + client) with:
+#   docker compose --profile demo up -d --build
+#
+# The demo backend is only reachable through the Crab tunnel. After it is up,
+# curl http://127.0.0.1:18080/ from the host.
+
+services:
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crab:2.0.0
+    container_name: crab-master
+    restart: unless-stopped
+    command: ["--config", "/etc/crab/config.json"]
+    volumes:
+      - ./deploy/master.json:/etc/crab/config.json:ro
+    ports:
+      - "51324:51324"
+    networks:
+      - crab
+
+  demo-backend:
+    image: nginx:1.30.4-alpine
+    container_name: crab-demo-backend
+    restart: unless-stopped
+    profiles: ["demo"]
+    networks:
+      - crab-intranet
+    # Not published. Only the Crab server on the intranet network can reach it.
+
+  server:
+    image: crab:2.0.0
+    container_name: crab-server
+    restart: unless-stopped
+    profiles: ["demo"]
+    depends_on:
+      - master
+      - demo-backend
+    command: ["--config", "/etc/crab/config.json"]
+    volumes:
+      - ./deploy/server.json:/etc/crab/config.json:ro
+    networks:
+      - crab
+      - crab-intranet
+
+  client:
+    image: crab:2.0.0
+    container_name: crab-client
+    restart: unless-stopped
+    profiles: ["demo"]
+    depends_on:
+      - master
+      - server
+    command: ["--config", "/etc/crab/config.json"]
+    volumes:
+      - ./deploy/client.json:/etc/crab/config.json:ro
+    ports:
+      - "18080:18080"
+    networks:
+      - crab
+
+networks:
+  crab:
+    name: crab
+  crab-intranet:
+    name: crab-intranet
+    internal: true
